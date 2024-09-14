@@ -1,5 +1,3 @@
-# lib/regex_recovery.py
-
 from lib.dfa import DFA
 from lib.dfa_state import DFAState
 from collections import deque
@@ -8,7 +6,6 @@ class RegexRecovery:
     def recover_regex(self, dfa: DFA) -> str:
         """
         Attempts to recover the regex pattern from the minimized DFA using state elimination.
-        Note: This method is simplistic and may not handle all regex features accurately.
         """
         # Create a mapping from state ID to state
         state_map = {state.id: state for state in dfa.states}
@@ -40,7 +37,6 @@ class RegexRecovery:
             for i in list(state_map.keys()):
                 for j in list(state_map.keys()):
                     if regex_matrix[i][elim_state] and regex_matrix[elim_state][j]:
-                        # R_i,j = R_i,j | (R_i,k)(R_k,k)*R_k,j
                         part1 = regex_matrix[i][j]
                         part2 = set()
                         for r1 in regex_matrix[i][elim_state]:
@@ -91,9 +87,6 @@ class RegexRecovery:
         return reachable
 
     def escape_regex(self, symbol: str) -> str:
-        """
-        Escapes regex special characters.
-        """
         special_chars = set(".^$*+?{}[]\\|()")
         if symbol in special_chars:
             return f"\\{symbol}"
@@ -101,9 +94,6 @@ class RegexRecovery:
             return symbol
 
     def union_regex(self, regex_set: set) -> str:
-        """
-        Creates a union (OR) regex from a set of regex strings.
-        """
         if not regex_set:
             return ""
         elif len(regex_set) == 1:

@@ -24,8 +24,8 @@ class TokenType(Enum):
 
 class Token:
     def __init__(self, token_type: TokenType, value: str):
-        self.type = token_type  # TokenType instance
-        self.value = value      # The actual character or string
+        self.type = token_type
+        self.value = value     
 
     def __repr__(self):
         return f"Token({self.type}, '{self.value}')"
