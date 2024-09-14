@@ -1,34 +1,32 @@
 # main.py
+
 from lib.regex_lib import RegexLib
 
 def main():
-    try:
-        regex1 = RegexLib()
-        # regex2 = RegexLib()
+    regex = RegexLib()
+    pattern = r"(a|b)*c{2,3}"
+    print(f"Compiling pattern: {pattern}")
+    regex.compile(pattern)
 
-        regex1.compile("ab|c")
-        # regex2.compile("a+")
+    test_strings = ["aaabcc", "ababc", "c", "abcc", "abccc", "abcccc"]
+    for s in test_strings:
+        result = regex.match(s)
+        print(f"Match('{s}') = {result}")
 
-        dfa_min = regex1.get_dfa_min()
-        if dfa_min is None:
-            print("Error: DFA minimization failed.")
-            return
+    # Find all matches in a larger string
+    search_string = "aaabccabcccabcccc"
+    matches = regex.findall(search_string)
+    print(f"Findall in '{search_string}': {matches}")
 
-        # Augment the DFA
-        augmented_dfa = dfa_min.augment()
-        print("Augmented DFA created.")
-        result = augmented_dfa.match("a")
-        print(f"Result of matching 'a' in the augmented DFA: {result}")
+    # Complement DFA
+    complement_dfa = regex.complement()
+    if complement_dfa:
+        complement_result = complement_dfa.match("abcc")
+        print(f"Complement Match('abcc') = {complement_result}")
 
-        print(f"match : {dfa_min.match('cd')}")
-        #print(f"findall: {regex1.findall('a')}") #- уходит в бесконечный луп
-        #[] - не проходит dfa
-        #{} - не проходит dfa
-        
-
-    except Exception as e:
-        print(f"Error: {str(e)}")
-
+    # Recover regex from DFA
+    recovered_pattern = regex.recover_regex()
+    print(f"Recovered Regex: {recovered_pattern}")
 
 if __name__ == "__main__":
     main()

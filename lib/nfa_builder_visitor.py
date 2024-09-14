@@ -1,221 +1,265 @@
-# regex_lib/nfa_builder_visitor.py
+# lib/nfa_builder_visitor.py
 
 from lib.ast_visitor import ASTVisitor
-from lib.nfa import NFA
-from lib.NFAState import NFAState
-from lib.ast_tree import StarNode, ConcatNode, OrNode, EmptyNode, CharNode
+from lib.nfa import NFA, NFAState
+from lib.ast_tree import (
+    CharNode, ConcatNode, StarNode, OrNode, GroupNode,
+    BackreferenceNode, RangeNode, RepeatNode, EmptyNode,
+    CharacterSetNode, RepeatExactNode
+)
 
 class NFABuilderVisitor(ASTVisitor):
     def __init__(self):
-        self.id_counter = 0
-        self.group_counter = 0
-        self.state_map = {}
+        self.group_map = {}  # Maps group numbers to (start_state, end_state)
         self.nfa = None
+        self.current_group = None
 
     def get_nfa(self):
         return self.nfa
 
-    def create_state(self, is_final=False):
-        state = NFAState(is_final)
-        self.state_map[state.get_id()] = state
-        return state
+    def visit_char_node(self, node):
+        start = NFAState(False)
+        end = NFAState(True)
+        start.add_transition(node.get_value(), end)
+        self.nfa = NFA(start, {end})
 
-    def visit_char_node(self, char_node):
-        print(f"Visiting CharNode with value: {char_node.get_value()}")
-        start_state = self.create_state(False)
-        end_state = self.create_state(True)
-        start_state.add_transition(char_node.get_value(), end_state)
-        self.nfa = NFA(start_state, {end_state})
-        print(f"Created NFA for CharNode: Start={start_state.get_id()}, End={end_state.get_id()}")
-
-    def visit_group_node(self, group_node):
-        inner_visitor = NFABuilderVisitor()
-        group_node.get_child().accept(inner_visitor)
-        inner_nfa = inner_visitor.get_nfa()
-
-        start_state = self.create_state(False)
-        end_state = self.create_state(True)
-
-        start_state.add_epsilon_transition(inner_nfa.get_start_state())
-
-        for state in inner_nfa.get_final_states():
-            state.add_epsilon_transition(end_state)
-            state.set_final(False)
-
-        self.nfa = NFA(start_state, {end_state})
-
-    def visit_concat_node(self, concat_node):
+    def visit_concat_node(self, node):
         left_visitor = NFABuilderVisitor()
-        concat_node.get_left().accept(left_visitor)
+        node.get_left().accept(left_visitor)
         left_nfa = left_visitor.get_nfa()
 
         right_visitor = NFABuilderVisitor()
-        concat_node.get_right().accept(right_visitor)
+        node.get_right().accept(right_visitor)
         right_nfa = right_visitor.get_nfa()
 
         for state in left_nfa.get_final_states():
+            state.is_final = False
             state.add_epsilon_transition(right_nfa.get_start_state())
-            state.set_final(False)
 
         self.nfa = NFA(left_nfa.get_start_state(), right_nfa.get_final_states())
 
-    def visit_or_node(self, or_node):
-        start_state = self.create_state(False)
-        end_state = self.create_state(True)
+    def visit_star_node(self, node):
+        inner_visitor = NFABuilderVisitor()
+        node.get_child().accept(inner_visitor)
+        inner_nfa = inner_visitor.get_nfa()
 
+        start = NFAState(False)
+        end = NFAState(True)
+
+        start.add_epsilon_transition(inner_nfa.get_start_state())
+        start.add_epsilon_transition(end)
+
+        for state in inner_nfa.get_final_states():
+            state.is_final = False
+            state.add_epsilon_transition(inner_nfa.get_start_state())
+            state.add_epsilon_transition(end)
+
+        self.nfa = NFA(start, {end})
+
+    def visit_or_node(self, node):
         left_visitor = NFABuilderVisitor()
-        or_node.get_left().accept(left_visitor)
+        node.get_left().accept(left_visitor)
         left_nfa = left_visitor.get_nfa()
 
         right_visitor = NFABuilderVisitor()
-        or_node.get_right().accept(right_visitor)
+        node.get_right().accept(right_visitor)
         right_nfa = right_visitor.get_nfa()
 
-        start_state.add_epsilon_transition(left_nfa.get_start_state())
-        start_state.add_epsilon_transition(right_nfa.get_start_state())
+        start = NFAState(False)
+        end = NFAState(True)
+
+        start.add_epsilon_transition(left_nfa.get_start_state())
+        start.add_epsilon_transition(right_nfa.get_start_state())
 
         for state in left_nfa.get_final_states():
-            state.add_epsilon_transition(end_state)
-            state.set_final(False)
+            state.is_final = False
+            state.add_epsilon_transition(end)
 
         for state in right_nfa.get_final_states():
-            state.add_epsilon_transition(end_state)
-            state.set_final(False)
+            state.is_final = False
+            state.add_epsilon_transition(end)
 
-        self.nfa = NFA(start_state, {end_state})
+        self.nfa = NFA(start, {end})
 
-    def visit_star_node(self, star_node):
-        start_state = self.create_state(False)
-        end_state = self.create_state(True)
-
+    def visit_capture_group_node(self, node):
+        group_num = node.get_group_num()
         inner_visitor = NFABuilderVisitor()
-        star_node.get_child().accept(inner_visitor)
+        node.get_child().accept(inner_visitor)
         inner_nfa = inner_visitor.get_nfa()
 
-        start_state.add_epsilon_transition(inner_nfa.get_start_state())
-        start_state.add_epsilon_transition(end_state)
+        start = NFAState(False)
+        end = NFAState(True)
 
+        start.add_epsilon_transition(inner_nfa.get_start_state())
         for state in inner_nfa.get_final_states():
-            state.add_epsilon_transition(end_state)
-            state.add_epsilon_transition(inner_nfa.get_start_state())
-            state.set_final(False)
+            state.is_final = False
+            state.add_epsilon_transition(end)
 
-        self.nfa = NFA(start_state, {end_state})
+        self.group_map[group_num] = (start, end)
+        self.nfa = NFA(start, {end})
 
-    def visit_range_node(self, range_node):
-        ranges = range_node.get_ranges()
-        or_node = None
+    def visit_non_capturing_group_node(self, node):
+        inner_visitor = NFABuilderVisitor()
+        node.get_child().accept(inner_visitor)
+        self.nfa = inner_visitor.get_nfa()
 
-        for range_str in ranges:
-            if len(range_str) == 1:
-                char_node = CharNode(range_str[0])
-                if or_node is None:
-                    or_node = char_node
+    def visit_backreference_node(self, node):
+        group_num = node.get_group_num()
+        if group_num not in self.group_map:
+            raise ValueError(f"Undefined backreference to group {group_num}")
+
+        start, end = self.group_map[group_num]
+        self.nfa = NFA(start, {end})
+
+    def visit_repeat_node(self, node):
+        min_repeats = node.get_min()
+        max_repeats = node.get_max()
+        child = node.get_child()
+
+        if max_repeats is not None and min_repeats > max_repeats:
+            raise ValueError("Minimum repeats cannot exceed maximum repeats.")
+
+        # Build NFA for child
+        child_visitor = NFABuilderVisitor()
+        child.accept(child_visitor)
+        child_nfa = child_visitor.get_nfa()
+
+        if min_repeats == 0 and max_repeats == 0:
+            # Equivalent to empty string
+            start = NFAState(False)
+            end = NFAState(True)
+            start.add_epsilon_transition(end)
+            self.nfa = NFA(start, {end})
+            return
+
+        nfa = None
+        previous_end_states = set()
+
+        for _ in range(min_repeats):
+            if nfa is None:
+                nfa = child_nfa
+            else:
+                for state in previous_end_states:
+                    state.is_final = False
+                    state.add_epsilon_transition(child_nfa.get_start_state())
+                nfa = NFA(nfa.get_start_state(), child_nfa.get_final_states())
+            previous_end_states = child_nfa.get_final_states()
+
+        if max_repeats is None:
+            # Unlimited repetitions after min_repeats
+            star_visitor = NFABuilderVisitor()
+            star_node = StarNode(child)
+            star_node.accept(star_visitor)
+            star_nfa = star_visitor.get_nfa()
+
+            if nfa is None:
+                nfa = star_nfa
+            else:
+                for state in previous_end_states:
+                    state.is_final = False
+                    state.add_epsilon_transition(star_nfa.get_start_state())
+                nfa = NFA(nfa.get_start_state(), star_nfa.get_final_states())
+        elif max_repeats > min_repeats:
+            # Limited repetitions
+            optional_part = max_repeats - min_repeats
+            for _ in range(optional_part):
+                optional_visitor = NFABuilderVisitor()
+                optional_nfa = child.accept(optional_visitor) or child_visitor.get_nfa()
+
+                start = NFAState(False)
+                end = NFAState(True)
+                start.add_epsilon_transition(optional_nfa.get_start_state())
+                start.add_epsilon_transition(end)
+
+                for state in optional_nfa.get_final_states():
+                    state.is_final = False
+                    state.add_epsilon_transition(end)
+
+                if nfa is None:
+                    nfa = NFA(start, {end})
                 else:
-                    or_node = OrNode(or_node, char_node)
-            elif len(range_str) == 3 and range_str[1] == '-':
-                start_char = range_str[0]
-                end_char = range_str[2]
-                for char in range(ord(start_char), ord(end_char) + 1):
-                    char_node = CharNode(chr(char))
-                    if or_node is None:
-                        or_node = char_node
-                    else:
-                        or_node = OrNode(or_node, char_node)
+                    for state in previous_end_states:
+                        state.is_final = False
+                        state.add_epsilon_transition(start)
+                    nfa = NFA(nfa.get_start_state(), {end})
 
-        if or_node:
-            or_node.accept(self)
+        self.nfa = nfa
 
-    def visit_repeat_node(self, repeat_node):
-        min_repeats = repeat_node.get_min()
-        max_repeats = repeat_node.get_max()
-        node = repeat_node.get_child()
-        result_node = None
+    def visit_range_node(self, node):
+        ranges = node.get_ranges()
+        negated = node.is_negated()
+        start = NFAState(False)
+        end = NFAState(True)
 
-        if min_repeats is not None and max_repeats is None:
-            # Create 'min' repetitions followed by Kleene star
-            result_node = self.create_repetition(node, min_repeats)
-            result_node = ConcatNode(result_node, StarNode(node))
-        elif min_repeats is None and max_repeats is not None:
-            # Create a range of possible repetitions up to 'max'
-            result_node = self.create_optional_repetitions(node, max_repeats)
-        elif min_repeats is not None and min_repeats == max_repeats:
-            # Create exactly 'min' repetitions
-            result_node = self.create_repetition(node, min_repeats)
+        if negated:
+            # Assuming printable ASCII for negation
+            import string
+            all_chars = set(string.printable)
+            range_chars = set()
+            for r in ranges:
+                if len(r) == 2:
+                    range_chars.update(chr(c) for c in range(ord(r[0]), ord(r[1]) + 1))
+                else:
+                    range_chars.add(r[0])
+            complement_chars = all_chars - range_chars
+            for ch in complement_chars:
+                start.add_transition(ch, end)
         else:
-            # Create a combination of minimum and optional extra repetitions
-            result_node = self.create_repetition(node, min_repeats)
-            for _ in range(min_repeats, max_repeats):
-                result_node = ConcatNode(result_node, OrNode(node, EmptyNode()))
+            for r in ranges:
+                if len(r) == 2:
+                    for c in range(ord(r[0]), ord(r[1]) + 1):
+                        start.add_transition(chr(c), end)
+                else:
+                    start.add_transition(r[0], end)
 
-        if result_node:
-            result_node.accept(self)
+        self.nfa = NFA(start, {end})
 
-    def create_repetition(self, node, times):
-        result_node = None
-        for _ in range(times):
-            result_node = ConcatNode(result_node, node) if result_node else node
-        return result_node
-
-    def create_optional_repetitions(self, node, max_repeats):
-        result_node = EmptyNode()
-        for _ in range(max_repeats):
-            result_node = OrNode(ConcatNode(result_node, node), result_node)
-        return result_node
-
-    def visit_lookahead_node(self, lookahead_node):
-        main_visitor = NFABuilderVisitor()
-        lookahead_node.get_main_expr().accept(main_visitor)
-        main_nfa = main_visitor.get_nfa()
-
-        lookahead_visitor = NFABuilderVisitor()
-        lookahead_node.get_lookahead_expr().accept(lookahead_visitor)
-        lookahead_nfa = lookahead_visitor.get_nfa()
-
-        start_state = self.create_state(False)
-
-        start_state.add_epsilon_transition(main_nfa.get_start_state())
-
-        for state in main_nfa.get_final_states():
-            state.add_epsilon_transition(lookahead_nfa.get_start_state())
-            state.set_final(False)
-
-        self.nfa = NFA(start_state, lookahead_nfa.get_final_states())
-
-    def visit_empty_node(self, empty_node):
-        start_state = self.create_state(True)
-        self.nfa = NFA(start_state, {start_state})
+    def visit_empty_node(self, node):
+        start = NFAState(False)
+        end = NFAState(True)
+        start.add_epsilon_transition(end)
+        self.nfa = NFA(start, {end})
 
     def visit_character_set_node(self, node):
-        print(f"Visiting character set node: {node.char_set}")
-        """
-        Handle the character set node in the NFA builder visitor.
-        """
-        start_state = self.create_state(False)
-        end_state = self.create_state(True)
+        # Similar to RangeNode but with explicit characters
+        characters = node.get_characters()
+        start = NFAState(False)
+        end = NFAState(True)
+        for ch in characters:
+            start.add_transition(ch, end)
+        self.nfa = NFA(start, {end})
 
-        for char in node.char_set:
-            start_state.add_transition(char, end_state)
+    def visit_repeat_exact_node(self, node):
+        exact = node.get_exact_repeats()
+        child = node.get_child()
 
-        self.nfa = NFA(start_state, {end_state})
+        if exact < 0:
+            raise ValueError("Exact repeats cannot be negative.")
 
-    # regex_lib/nfa_builder_visitor.py
+        if exact == 0:
+            # Equivalent to empty string
+            start = NFAState(False)
+            end = NFAState(True)
+            start.add_epsilon_transition(end)
+            self.nfa = NFA(start, {end})
+            return
 
-def visit_repeat_exact_node(self, node):
-    """
-    Handle the repeat exact node in the NFA builder visitor.
-    """
-    start_state = self.create_state(False)
-    prev_end_state = None
+        nfa = None
+        previous_end_states = set()
 
-    # For exact repetitions, create the corresponding NFA states
-    for _ in range(node.repeat_value):
-        end_state = self.create_state(False)
-        if prev_end_state:
-            prev_end_state.add_epsilon_transition(end_state)
-        prev_end_state = end_state
+        for _ in range(exact):
+            child_visitor = NFABuilderVisitor()
+            child.accept(child_visitor)
+            child_nfa = child_visitor.get_nfa()
 
-    if prev_end_state:
-        prev_end_state.set_final(True)
-    self.nfa = NFA(start_state, {prev_end_state})
+            if nfa is None:
+                nfa = child_nfa
+            else:
+                for state in previous_end_states:
+                    state.is_final = False
+                    state.add_epsilon_transition(child_nfa.get_start_state())
+                nfa = NFA(nfa.get_start_state(), child_nfa.get_final_states())
 
+            previous_end_states = child_nfa.get_final_states()
+
+        self.nfa = nfa

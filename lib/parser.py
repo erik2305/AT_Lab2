@@ -1,155 +1,171 @@
-# regex_lib/parser.py
+# lib/parser.py
 
-from lib.ast_tree import *
+from lib.ast_tree import (
+    ASTTree, CharNode, ConcatNode, OrNode, StarNode, GroupNode,
+    RepeatNode, RangeNode, BackreferenceNode, EmptyNode, CharacterSetNode, RepeatExactNode
+)
 from lib.lexer import Lexer
-from lib.token import TokenType
+from lib.token import TokenType, Token
 
 class Parser:
-    def __init__(self, lexer):
+    def __init__(self, lexer: Lexer):
         self.lexer = lexer
-        self.current_token = None
-        self.advance()
+        self.current_token: Token = self.lexer.get_token()
+        self.group_num = 1  # Start numbering groups from 1
 
-    def advance(self):
-        self.current_token = self.lexer.get_token()
-        print(f"Advanced to token: {self.current_token.type} with symbol: {self.current_token.symbol}")
+    def parse(self) -> ASTTree:
+        return self.regex()
 
-    def match(self, expected_type):
-        if self.current_token.type == expected_type:
-            self.advance()
+    def consume(self, token_type: TokenType):
+        if self.current_token.type == token_type:
+            self.current_token = self.lexer.get_token()
         else:
-            raise Exception(f"Unexpected token: {self.current_token.type}")
+            raise SyntaxError(f"Expected token {token_type}, got {self.current_token.type}")
 
-    def parse(self):
-        tree = self.regex()
-        return tree
-
-    def regex(self):
-        print("Entering regex()")
-        left = self.term()
+    def regex(self) -> ASTTree:
+        """
+        regex := term ('|' term)*
+        """
+        node = self.term()
         while self.current_token.type == TokenType.OR:
-            print("Found OR operator")
-            self.advance()
+            self.consume(TokenType.OR)
             right = self.term()
-            left = OrNode(left, right)  # Ensure this creates an OrNode for the alternation
-        print("Exiting regex()")
-        return left
-
-
-    def term(self):
-        print("Entering term()")
-        node = self.factor()
-        while self.is_literal(self.current_token) or self.current_token.type in [TokenType.GROUP_START, TokenType.RANGE_START]:
-            print("Concatenating factors")
-            next_factor = self.factor()
-            node = ConcatNode(node, next_factor)
-        print("Exiting term()")
+            node = OrNode(node, right)
         return node
 
-    def is_literal(self, token):
-        return token.type in [TokenType.LETTER, TokenType.DIGIT, TokenType.NOT_SPECIAL_SYMBOL]
-
-    def factor(self):
-        node = self.atom()
-        if self.current_token.type == TokenType.CHARACTER_SET:
-            return self.parse_character_set_node()
-        if self.current_token.type == TokenType.REPEAT_EXACT:
-            return self.parse_repeat_node()
-        while self.current_token.type in [TokenType.KLEENE_STAR, TokenType.REPEAT_START, TokenType.LOOKAHEAD]:
-            if self.current_token.type == TokenType.KLEENE_STAR:
-                self.advance()
-                node = StarNode(node)
-            elif self.current_token.type == TokenType.REPEAT_START:
-                node = self.parse_repeat(node)
-            elif self.current_token.type == TokenType.LOOKAHEAD:
-                self.advance()
-                lookahead_expr = self.regex()
-                node = LookaheadNode(node, lookahead_expr)
-        return node
-
-    def atom(self):
-        if self.current_token.type == TokenType.GROUP_START:
-            print("Starting a group")
-            self.advance()
-            node = self.regex()
-            self.match(TokenType.GROUP_END)
-            print("Group parsed successfully")
-            return GroupNode(node)
-        elif self.current_token.type == TokenType.RANGE_START:
-            return self.parse_range()
-        elif self.current_token.type == TokenType.ESCAPE:
-            self.advance()
-            if self.current_token.type in [TokenType.REPEAT_START, TokenType.REPEAT_END, TokenType.GROUP_START, TokenType.GROUP_END,
-                                           TokenType.OR, TokenType.RANGE_START, TokenType.RANGE_END, TokenType.LOOKAHEAD]:
-                value = self.current_token.symbol
-                self.advance()
-                return CharNode(value)
-            elif self.is_literal(self.current_token):
-                value = self.current_token.symbol
-                self.advance()
-                return CharNode(value)
-            else:
-                raise (f"Unexpected token after escape: {self.current_token.type}")
-        elif self.is_literal(self.current_token):
-            value = self.current_token.symbol
-            self.advance()
-            return CharNode(value)
-        elif self.current_token.type == TokenType.EMPTY_STRING:
-            self.advance()
+    def term(self) -> ASTTree:
+        """
+        term := factor+
+        """
+        nodes = []
+        while self.current_token.type in (
+            TokenType.LETTER , TokenType.ESCAPED_CHAR, TokenType.GROUP_START,
+            TokenType.NON_CAPTURING_GROUP_START, TokenType.RANGE_START, TokenType.NOT_SPECIAL_SYMBOL, TokenType.EMPTY_STRING
+        ):
+            nodes.append(self.factor())
+        if not nodes:
             return EmptyNode()
+        node = nodes[0]
+        for next_node in nodes[1:]:
+            node = ConcatNode(node, next_node)
+        return node
+
+    def factor(self) -> ASTTree:
+        """
+        factor := atom ('*' | '+' | '?' | '{' number [',' number] '}')*
+        """
+        node = self.atom()
+        while self.current_token.type in (
+            TokenType.KLEENE_STAR, TokenType.PLUS, TokenType.QUESTION, TokenType.REPEAT_START
+        ):
+            if self.current_token.type == TokenType.KLEENE_STAR:
+                self.consume(TokenType.KLEENE_STAR)
+                node = StarNode(node)
+            elif self.current_token.type == TokenType.PLUS:
+                self.consume(TokenType.PLUS)
+                node = RepeatNode(child=node, min_repeats=1, max_repeats=None)
+            elif self.current_token.type == TokenType.QUESTION:
+                self.consume(TokenType.QUESTION)
+                node = RepeatNode(child=node, min_repeats=0, max_repeats=1)
+            elif self.current_token.type == TokenType.REPEAT_START:
+                node = self.repeat(node)
+        return node
+
+    def atom(self) -> ASTTree:
+        """
+        atom := LETTER | ESCAPED_CHAR | '.' | '(' regex ')' | '(?:' regex ')' | '[' range ']' | '$' | '\\' number
+        """
+        token = self.current_token
+        if token.type == TokenType.LETTER:
+            self.consume(TokenType.LETTER)
+            return CharNode(token.value)
+        elif token.type == TokenType.ESCAPED_CHAR:
+            self.consume(TokenType.ESCAPED_CHAR)
+            return CharNode(token.value)
+        elif token.type == TokenType.NOT_SPECIAL_SYMBOL:
+            self.consume(TokenType.NOT_SPECIAL_SYMBOL)
+            # Represent '.' as a character set of all printable characters except newline
+            import string
+            characters = set(string.printable) - {'\n', '\r'}
+            return CharacterSetNode(characters)
+        elif token.type == TokenType.GROUP_START:
+            self.consume(TokenType.GROUP_START)
+            node = self.regex()
+            self.consume(TokenType.GROUP_END)
+            group_node = GroupNode(child=node, group_num=self.group_num, capturing=True)
+            self.group_num += 1
+            return group_node
+        elif token.type == TokenType.NON_CAPTURING_GROUP_START:
+            self.consume(TokenType.NON_CAPTURING_GROUP_START)
+            node = self.regex()
+            self.consume(TokenType.GROUP_END)
+            return GroupNode(child=node, capturing=False)
+        elif token.type == TokenType.RANGE_START:
+            return self.character_set()
+        elif token.type == TokenType.EMPTY_STRING:
+            self.consume(TokenType.EMPTY_STRING)
+            return EmptyNode()
+        elif token.type == TokenType.BACKREFERENCE:
+            self.consume(TokenType.BACKREFERENCE)
+            group_num = int(token.value)
+            return BackreferenceNode(group_num=group_num)
         else:
-            raise SyntaxError(f"Unexpected token: {self.current_token.type}, symbol: {self.current_token.symbol}")
+            raise SyntaxError(f"Unexpected token: {token.type}")
 
-    def parse_range(self):
+    def character_set(self) -> ASTTree:
+        """
+        character_set := '[' '^'? range ']'
+        range := ... (to be implemented)
+        """
+        self.consume(TokenType.RANGE_START)
+        negated = False
+        if self.current_token.type == TokenType.ESCAPED_CHAR and self.current_token.value == '^':
+            negated = True
+            self.consume(TokenType.ESCAPED_CHAR)
         ranges = []
-        self.advance()
-        current_range = []
         while self.current_token.type != TokenType.RANGE_END:
-            if self.is_literal(self.current_token):
-                current_range.append(self.current_token.symbol)
-                self.advance()
-                if self.current_token.type == TokenType.NOT_SPECIAL_SYMBOL and self.current_token.symbol == '-':
-                    current_range.append('-')
-                    self.advance()
-                    current_range.append(self.current_token.symbol)
-                    ranges.append(''.join(current_range))
-                    current_range = []
-                    self.advance()
+            if self.current_token.type == TokenType.LETTER or self.current_token.type == TokenType.ESCAPED_CHAR:
+                first_char = self.current_token.value
+                self.consume(self.current_token.type)
+                if self.current_token.type == TokenType.ESCAPED_CHAR and self.current_token.value == '-':
+                    self.consume(TokenType.ESCAPED_CHAR)
+                    if self.current_token.type in (TokenType.LETTER, TokenType.ESCAPED_CHAR):
+                        second_char = self.current_token.value
+                        self.consume(self.current_token.type)
+                        ranges.append((first_char, second_char))
+                    else:
+                        raise SyntaxError("Invalid range in character set")
                 else:
-                    ranges.append(''.join(current_range))
-                    current_range = []
-        self.advance()
-        return RangeNode(ranges)
+                    ranges.append((first_char, first_char))
+            else:
+                raise SyntaxError("Invalid character in character set")
+        self.consume(TokenType.RANGE_END)
+        return RangeNode(ranges=ranges, negated=negated)
 
-    def parse_repeat(self, child):
-        min_repeats = None
-        max_repeats = None
-        self.advance()
-
-        if self.current_token.type == TokenType.DIGIT:
-            min_repeats = int(self.current_token.symbol)
-            self.advance()
-
-        if self.current_token.type == TokenType.NOT_SPECIAL_SYMBOL and self.current_token.symbol == ',':
-            self.advance()
+    def repeat(self, node: ASTTree) -> ASTTree:
+        """
+        Handles repetition constructs like {x}, {x,}, {x,y}
+        """
+        self.consume(TokenType.REPEAT_START)
+        min_repeats = self.number()
+        max_repeats = min_repeats
+        if self.current_token.type == TokenType.COMMA:
+            self.consume(TokenType.COMMA)
             if self.current_token.type == TokenType.DIGIT:
-                max_repeats = int(self.current_token.symbol)
-                self.advance()
+                max_repeats = self.number()
+            else:
+                max_repeats = None  # No upper limit
+        self.consume(TokenType.REPEAT_END)
+        return RepeatNode(child=node, min_repeats=min_repeats, max_repeats=max_repeats)
 
-        self.match(TokenType.REPEAT_END)
-
-        return RepeatNode(child, min_repeats, max_repeats)
-    def parse_character_set_node(self):
+    def number(self) -> int:
         """
-        Handle the CHARACTER_SET token by creating a corresponding AST node.
+        Parses a number (one or more digits)
         """
-        char_set = self.current_token.symbol  # Get the character set
-        self.advance()  # Move to the next token
-        return CharacterSetNode(char_set)  # Create a new AST node for the character set
-    def parse_repeat_node(self):
-        """
-        Handle the REPEAT_EXACT token by creating a corresponding AST node.
-        """
-        repeat_value = int(self.current_token.symbol)  # Get the number of repetitions
-        self.advance()  # Move to the next token
-        return RepeatExactNode(repeat_value)
+        token = self.current_token
+        if token.type == TokenType.DIGIT:
+            num = int(token.value)
+            self.consume(TokenType.DIGIT)
+            return num
+        else:
+            raise SyntaxError(f"Expected number, got {token.type}")

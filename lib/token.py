@@ -1,29 +1,31 @@
-# regex_lib/token.py
-from enum import Enum
+# lib/token.py
+from enum import Enum, auto
 
 class TokenType(Enum):
-    LETTER = "LETTER"
-    DIGIT = "DIGIT"
-    OR = "OR"
-    KLEENE_STAR = "KLEENE_STAR"
-    GROUP_START = "GROUP_START"
-    GROUP_END = "GROUP_END"
-    RANGE_START = "RANGE_START"
-    RANGE_END = "RANGE_END"
-    ESCAPE = "ESCAPE"
-    EMPTY_STRING = "EMPTY_STRING"
-    REPEAT_START = "REPEAT_START"
-    REPEAT_END = "REPEAT_END"
-    NOT_SPECIAL_SYMBOL = "NOT_SPECIAL_SYMBOL"
-    LOOKAHEAD = "LOOKAHEAD"
-    END = "END"
-    CHARACTER_SET = "CHARACTER_SET"
-    REPEAT_EXACT = "REPEAT_EXACT"
+    LITERAL = auto()
+    ESCAPED_CHAR = auto()
+    OR = auto()
+    KLEENE_STAR = auto()
+    PLUS = auto()
+    QUESTION = auto()
+    RANGE_START = auto()
+    RANGE_END = auto()
+    GROUP_START = auto()
+    GROUP_END = auto()
+    NON_CAPTURING_GROUP_START = auto()
+    REPEAT_START = auto()
+    REPEAT_END = auto()
+    BACKREFERENCE = auto()
+    EMPTY_STRING = auto()
+    ANY_CHAR = auto()
+    COMMA = auto()
+    DIGIT = auto()
+    END = auto()
 
 class Token:
-    def __init__(self, token_type, symbol):
+    def __init__(self, token_type: TokenType, value: str):
         self.type = token_type  # TokenType instance
-        self.symbol = symbol    # The actual character or string
+        self.value = value      # The actual character or string
 
     def __repr__(self):
-        return f"Token({self.type}, '{self.symbol}')"
+        return f"Token({self.type}, '{self.value}')"

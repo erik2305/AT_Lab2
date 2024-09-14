@@ -1,73 +1,60 @@
-# regex_lib/nfa_to_dfa_converter.py
+# lib/nfa_to_dfa_converter.py
 
-from regex_lib.dfa import DFA
-from regex_lib.dfa_state import DFAState
 from collections import deque
+from lib.dfa import DFA
+from lib.dfa_state import DFAState
+from lib.nfa import NFA, NFAState
 
 class NFAtoDFAConverter:
-    def convert(self, nfa):
-        dfa_states_map = {}
+    def convert(self, nfa: NFA) -> DFA:
+        start_closure = self.epsilon_closure({nfa.get_start_state()})
+        state_mappings = {}
+        dfa_states = set()
         queue = deque()
 
-        # Use frozenset instead of set for the closure to make it hashable
-        start_closure = frozenset(self.epsilon_closure({nfa.get_start_state()}))
-        start_state = DFAState(start_closure, self.contains_final_state(start_closure, nfa.get_final_states()))
-        dfa_states_map[start_closure] = start_state
-        queue.append(start_closure)
-
-        final_states = set()
-        if start_state.is_final:
-            final_states.add(start_state)
+        # Create start state for DFA
+        start_state = DFAState(state_id=0, is_final=any(state.is_final for state in start_closure))
+        state_mappings[frozenset(start_closure)] = start_state
+        dfa_states.add(start_state)
+        queue.append(frozenset(start_closure))
+        state_id_counter = 1
 
         while queue:
-            current_closure = queue.popleft()
-            current_state = dfa_states_map[current_closure]
+            current_set = queue.popleft()
+            current_dfa_state = state_mappings[current_set]
 
-            symbols = self.get_all_symbols(current_closure)
+            transitions = {}
+            for nfa_state in current_set:
+                for symbol, target_states in nfa_state.transitions.items():
+                    if symbol == '\0':
+                        continue  # Epsilon transitions are already handled
+                    if symbol not in transitions:
+                        transitions[symbol] = set()
+                    transitions[symbol].update(target_states)
 
-            for symbol in symbols:
-                move_closure = frozenset(self.epsilon_closure(self.move(current_closure, symbol)))
+            for symbol, target_nfa_states in transitions.items():
+                closure = self.epsilon_closure(target_nfa_states)
+                closure_frozen = frozenset(closure)
+                if closure_frozen not in state_mappings:
+                    is_final = any(state.is_final for state in closure)
+                    new_dfa_state = DFAState(state_id=state_id_counter, is_final=is_final)
+                    state_mappings[closure_frozen] = new_dfa_state
+                    dfa_states.add(new_dfa_state)
+                    queue.append(closure_frozen)
+                    state_id_counter += 1
+                else:
+                    new_dfa_state = state_mappings[closure_frozen]
+                current_dfa_state.add_transition(symbol, new_dfa_state)
 
-                #print(f"Type of move_closure: {type(move_closure)}")
-                if move_closure not in dfa_states_map:
-                    is_final = self.contains_final_state(move_closure, nfa.get_final_states())
-                    next_state = DFAState(move_closure, is_final)
-                    dfa_states_map[move_closure] = next_state
-                    queue.append(move_closure)
-                    if is_final:
-                        final_states.add(next_state)
+        return DFA(start_state=start_state, states=dfa_states)
 
-                current_state.add_transition(symbol, dfa_states_map[move_closure])
-
-        return DFA(start_state, final_states)
-
-
-    def epsilon_closure(self, states):
+    def epsilon_closure(self, states: set) -> set:
         stack = list(states)
         closure = set(states)
-
         while stack:
             state = stack.pop()
-            for next_state in state.get_transitions().get('\0', set()):
+            for next_state in state.transitions.get('\0', set()):
                 if next_state not in closure:
                     closure.add(next_state)
                     stack.append(next_state)
-
         return closure
-
-    def move(self, states, symbol):
-        move_set = set()
-        for state in states:
-            move_set.update(state.get_transitions().get(symbol, set()))
-        return move_set
-
-    def get_all_symbols(self, states):
-        symbols = set()
-        for state in states:
-            for symbol in state.get_transitions().keys():
-                if symbol != '\0':  # Ignore epsilon transitions
-                    symbols.add(symbol)
-        return symbols
-
-    def contains_final_state(self, states, final_states):
-        return any(state in final_states for state in states)

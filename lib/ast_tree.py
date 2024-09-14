@@ -1,4 +1,4 @@
-# regex_lib/ast_tree.py
+# lib/ast_tree.py
 from abc import ABC, abstractmethod
 
 class ASTTree(ABC):
@@ -6,7 +6,6 @@ class ASTTree(ABC):
     def accept(self, visitor):
         pass
 
-# regex_lib/ast_tree.py
 class CharNode(ASTTree):
     def __init__(self, value):
         self.value = value
@@ -17,7 +16,6 @@ class CharNode(ASTTree):
     def accept(self, visitor):
         visitor.visit_char_node(self)
 
-# regex_lib/ast_tree.py
 class ConcatNode(ASTTree):
     def __init__(self, left, right):
         self.left = left
@@ -31,7 +29,7 @@ class ConcatNode(ASTTree):
 
     def accept(self, visitor):
         visitor.visit_concat_node(self)
-# regex_lib/ast_tree.py
+
 class StarNode(ASTTree):
     def __init__(self, child):
         self.child = child
@@ -42,7 +40,6 @@ class StarNode(ASTTree):
     def accept(self, visitor):
         visitor.visit_star_node(self)
 
-# regex_lib/ast_tree.py
 class OrNode(ASTTree):
     def __init__(self, left, right):
         self.left = left
@@ -56,19 +53,30 @@ class OrNode(ASTTree):
 
     def accept(self, visitor):
         visitor.visit_or_node(self)
-# regex_lib/ast_tree.py
+
 class GroupNode(ASTTree):
-    def __init__(self, child):
+    def __init__(self, child, group_num=None, capturing=True):
         self.child = child
+        self.group_num = group_num
+        self.capturing = capturing
 
     def get_child(self):
         return self.child
 
+    def get_group_num(self):
+        return self.group_num
+
+    def is_capturing(self):
+        return self.capturing
+
     def accept(self, visitor):
-        visitor.visit_group_node(self)
-# regex_lib/ast_tree.py
+        if self.capturing:
+            visitor.visit_capture_group_node(self)
+        else:
+            visitor.visit_non_capturing_group_node(self)
+
 class RepeatNode(ASTTree):
-    def __init__(self, child, min_repeats, max_repeats):
+    def __init__(self, child, min_repeats, max_repeats=None):
         self.child = child
         self.min = min_repeats
         self.max = max_repeats
@@ -84,46 +92,55 @@ class RepeatNode(ASTTree):
 
     def accept(self, visitor):
         visitor.visit_repeat_node(self)
-# regex_lib/ast_tree.py
+
 class RangeNode(ASTTree):
-    def __init__(self, ranges):
-        self.ranges = ranges
+    def __init__(self, ranges, negated=False):
+        self.ranges = ranges  # List of tuples (start_char, end_char) or single characters
+        self.negated = negated
 
     def get_ranges(self):
         return self.ranges
 
+    def is_negated(self):
+        return self.negated
+
     def accept(self, visitor):
         visitor.visit_range_node(self)
-# regex_lib/ast_tree.py
-class LookaheadNode(ASTTree):
-    def __init__(self, main_expr, lookahead_expr):
-        self.main_expr = main_expr
-        self.lookahead_expr = lookahead_expr
 
-    def get_main_expr(self):
-        return self.main_expr
+class BackreferenceNode(ASTTree):
+    def __init__(self, group_num):
+        self.group_num = group_num
 
-    def get_lookahead_expr(self):
-        return self.lookahead_expr
+    def get_group_num(self):
+        return self.group_num
 
     def accept(self, visitor):
-        visitor.visit_lookahead_node(self)
-# regex_lib/ast_tree.py
+        visitor.visit_backreference_node(self)
+
 class EmptyNode(ASTTree):
     def accept(self, visitor):
         visitor.visit_empty_node(self)
 
 class CharacterSetNode(ASTTree):
-    def __init__(self, char_set):
-        self.char_set = char_set
+    def __init__(self, characters):
+        self.characters = characters  # Set of characters
+
+    def get_characters(self):
+        return self.characters
 
     def accept(self, visitor):
-        return visitor.visit_character_set_node(self)
-# regex_lib/ast.py
+        visitor.visit_character_set_node(self)
 
 class RepeatExactNode(ASTTree):
-    def __init__(self, repeat_value):
-        self.repeat_value = repeat_value
+    def __init__(self, child, exact_repeats):
+        self.child = child
+        self.exact_repeats = exact_repeats
+
+    def get_child(self):
+        return self.child
+
+    def get_exact_repeats(self):
+        return self.exact_repeats
 
     def accept(self, visitor):
-        return visitor.visit_repeat_exact_node(self)
+        visitor.visit_repeat_exact_node(self)

@@ -1,111 +1,117 @@
-# regex_lib/lexer.py
+# lib/lexer.py
 
 from lib.token import Token, TokenType
 
 class Lexer:
-    def __init__(self, pattern):
+    def __init__(self, pattern: str):
         self.pattern = pattern
         self.position = 0
+        self.length = len(pattern)
 
-    def position_inc(self):
+    def get_current_char(self) -> str:
+        if self.position < self.length:
+            return self.pattern[self.position]
+        return '\0'  # End of input
+
+    def advance(self):
         self.position += 1
 
-    def position_dec(self):
-        self.position -= 1
-
-    def get_current_char(self):
-        if self.position < len(self.pattern):
-            return self.pattern[self.position]
+    def peek(self) -> str:
+        if self.position + 1 < self.length:
+            return self.pattern[self.position + 1]
         return '\0'
 
-    def skip(self):
-        self.position_inc()
-        if self.get_current_char() != '\0':
-            return Token(TokenType.ESCAPE, self.get_current_char())
-        raise SyntaxError(f"Invalid escape character: {self.get_current_char()}")
+    def get_token(self) -> Token:
+        while self.position < self.length:
+            ch = self.get_current_char()
 
-    def get_token(self):
-        ch = self.get_current_char()
-        while ch != '\0':
-            if ch == '\'':
-                return self.skip()
+            if ch == '\\':
+                self.advance()
+                next_char = self.get_current_char()
+                if next_char.isdigit():
+                    # Backreference
+                    num_str = ''
+                    while self.get_current_char().isdigit():
+                        num_str += self.get_current_char()
+                        self.advance()
+                    return Token(TokenType.BACKREFERENCE, num_str)
+                elif next_char in {'\\', '|', '[', ']', '(', ')', '{', '}', '.', '*', '+', '?', '$', ','}:
+                    # Escaped special character
+                    self.advance()
+                    return Token(TokenType.ESCAPED_CHAR, next_char)
+                else:
+                    # Any other escaped character
+                    self.advance()
+                    return Token(TokenType.ESCAPED_CHAR, next_char)
+
             elif ch == '$':
-                self.position_inc()
+                self.advance()
                 return Token(TokenType.EMPTY_STRING, "$")
-            elif self.pattern[self.position:self.position + 3] == '...':
-                self.position += 3
-                return Token(TokenType.KLEENE_STAR, "...")
+
             elif ch == '|':
-                self.position_inc()
+                self.advance()
                 return Token(TokenType.OR, "|")
+
+            elif ch == '.':
+                # Treat '.' as a wildcard (any character)
+                self.advance()
+                return Token(TokenType.ANY_CHAR, ".")
+
+            elif ch == '*':
+                self.advance()
+                return Token(TokenType.KLEENE_STAR, "*")
+
+            elif ch == '+':
+                self.advance()
+                return Token(TokenType.PLUS, "+")
+
+            elif ch == '?':
+                self.advance()
+                return Token(TokenType.QUESTION, "?")
+
             elif ch == '[':
-                self.position_inc()
-                return self.parse_character_set()
+                self.advance()
+                return Token(TokenType.RANGE_START, "[")
+
             elif ch == ']':
-                self.position_inc()
+                self.advance()
                 return Token(TokenType.RANGE_END, "]")
+
             elif ch == '(':
-                self.position_inc()
-                return Token(TokenType.GROUP_START, "(")
+                self.advance()
+                if self.get_current_char() == ':':
+                    self.advance()
+                    return Token(TokenType.NON_CAPTURING_GROUP_START, "(:")
+                else:
+                    return Token(TokenType.GROUP_START, "(")
+
             elif ch == ')':
-                self.position_inc()
+                self.advance()
                 return Token(TokenType.GROUP_END, ")")
+
             elif ch == '{':
-                self.position_inc()
-                return self.parse_repeat_expression()
+                self.advance()
+                return Token(TokenType.REPEAT_START, "{")
+
             elif ch == '}':
-                self.position_inc()
+                self.advance()
                 return Token(TokenType.REPEAT_END, "}")
-            elif ch.isalpha():  # Letters
-                self.position_inc()
-                return Token(TokenType.LETTER, ch)
-            elif ch.isdigit():  # Digits
-                self.position_inc()
-                return Token(TokenType.DIGIT, ch)
-            else:  # Any other symbol
-                self.position_inc()
-                return Token(TokenType.NOT_SPECIAL_SYMBOL, ch)
+
+            elif ch == ',':
+                self.advance()
+                return Token(TokenType.COMMA, ",")
+
+            elif ch.isdigit():
+                # Numbers outside backreferences (if any)
+                num_str = ''
+                while self.get_current_char().isdigit():
+                    num_str += self.get_current_char()
+                    self.advance()
+                return Token(TokenType.DIGIT, num_str)
+
+            else:
+                # Literal characters
+                self.advance()
+                return Token(TokenType.LITERAL, ch)
 
         return Token(TokenType.END, "")
-    def parse_character_set(self):
-        """
-        Parse a character set inside [ ] brackets, e.g., [abc...] as individual characters.
-        """
-        character_set = []
-        ch = self.get_current_char()
-
-        while ch != ']' and ch != '\0':  # Continue until you find the closing bracket or EOF
-            character_set.append(ch)
-            self.position_inc()
-            ch = self.get_current_char()
-        if ch == ']':
-            self.position_inc()  # Skip the closing ]
-            return Token(TokenType.CHARACTER_SET, "".join(character_set))  # Return the set as a string or list
-        else:
-            raise SyntaxError("Unterminated character set")
-    def parse_repeat_expression(self):
-        """
-        Parse the repeat expression of the form {x}.
-        """
-        self.position_inc()  # Move past the opening '{'
-        repeat_value = self.parse_number()  # Extract the number inside the braces
-
-        if self.get_current_char() == '}':
-            self.position_inc()  # Move past the closing '}'
-            return Token(TokenType.REPEAT_EXACT, str(repeat_value))
-        else:
-            raise SyntaxError(f"Expected `}}` at position {self.position}")
-    
-    def parse_number(self):
-        """
-        Parse a number from the current position.
-        """
-        num_str = ''
-        ch = self.get_current_char()
-        
-        while ch.isdigit():
-            num_str += ch
-            self.position_inc()
-            ch = self.get_current_char()
-        
-        return int(num_str) if num_str else None

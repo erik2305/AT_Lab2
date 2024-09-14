@@ -8,6 +8,8 @@ class NFAState:
         NFAState.id_counter += 1
         self.transitions = {}
         self.is_final = is_final
+        self.group_start = None  # To mark the start of a capture group
+        self.group_end = None    # To mark the end of a capture group
 
     def get_id(self):
         return self.id
@@ -42,3 +44,11 @@ class NFAState:
             return f"State {self.id}, Final: {self.is_final}, Transitions: {transitions_repr}"
         else:
             return f"State {self.id}, Final: {self.is_final}"
+
+    def __eq__(self, other):
+        if isinstance(other, NFAState):
+            return self.id == other.id
+        return False
+
+    def __hash__(self):
+        return hash(self.id)
